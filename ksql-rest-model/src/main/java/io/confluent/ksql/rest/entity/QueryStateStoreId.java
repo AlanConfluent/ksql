@@ -16,6 +16,7 @@
 package io.confluent.ksql.rest.entity;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonValue;
 import com.google.common.base.Preconditions;
 import java.util.Objects;
@@ -24,6 +25,7 @@ import java.util.Objects;
  * This represents a unique store in the system and the basis for getting lag information from
  * KafkaStreams, exposed by the QueryMetadata.
  */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public final class QueryStateStoreId {
   private static final String SEPARATOR = "$";
 

@@ -1,0 +1,85 @@
+/*
+ * Copyright 2020 Confluent Inc.
+ *
+ * Licensed under the Confluent Community License (the "License"; you may not use
+ * this file except in compliance with the License. You may obtain a copy of the
+ * License at
+ *
+ * http://www.confluent.io/confluent-community-license
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OF ANY KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations under the License.
+ */
+
+package io.confluent.ksql.rest.entity;
+
+import static java.util.Objects.requireNonNull;
+
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.google.common.collect.ImmutableSet;
+import java.util.Objects;
+import java.util.Set;
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+public class ActiveStandbyEntity {
+
+  private final Set<String> activeStores;
+  private final Set<String> activePartitions;
+  private final Set<String> standByStores;
+  private final Set<String> standByPartitions;
+
+  @JsonCreator
+  public ActiveStandbyEntity(
+      @JsonProperty("activeStores") final Set<String> activeStores,
+      @JsonProperty("activePartitions") final Set<String> activePartitions,
+      @JsonProperty("standByStores") final Set<String> standByStores,
+      @JsonProperty("standByPartitions") final Set<String> standByPartitions
+  ) {
+    this.activeStores = ImmutableSet.copyOf(requireNonNull(activeStores));
+    this.activePartitions = ImmutableSet.copyOf(requireNonNull(activePartitions));
+    this.standByStores = ImmutableSet.copyOf(requireNonNull(standByStores));
+    this.standByPartitions = ImmutableSet.copyOf(requireNonNull(standByPartitions));
+  }
+
+  public Set<String> getActiveStores() {
+    return activeStores;
+  }
+
+  public Set<String> getStandByStores() {
+    return standByStores;
+  }
+
+  public Set<String> getActivePartitions() {
+    return activePartitions;
+  }
+
+  public Set<String> getStandByPartitions() {
+    return standByPartitions;
+  }
+
+  @Override
+  public boolean equals(final Object o) {
+    if (this == o) {
+      return true;
+    }
+
+    if (o == null || getClass() != o.getClass()) {
+      return false;
+    }
+
+    final ActiveStandbyEntity that = (ActiveStandbyEntity) o;
+    return activeStores.equals(that.activeStores)
+        && standByStores.equals(that.standByStores)
+        && activePartitions.equals(that.activePartitions)
+        && standByPartitions.equals(that.standByPartitions);
+  }
+
+  @Override
+  public int hashCode() {
+    return Objects.hash(activeStores, standByStores, activePartitions, standByPartitions);
+  }
+}

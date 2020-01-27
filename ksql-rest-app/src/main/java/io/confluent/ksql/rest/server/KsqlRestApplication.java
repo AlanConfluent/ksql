@@ -52,6 +52,7 @@ import io.confluent.ksql.rest.server.computation.CommandStore;
 import io.confluent.ksql.rest.server.computation.InteractiveStatementExecutor;
 import io.confluent.ksql.rest.server.context.KsqlSecurityContextBinder;
 import io.confluent.ksql.rest.server.filters.KsqlAuthorizationFilter;
+import io.confluent.ksql.rest.server.resources.ActiveStandbyResource;
 import io.confluent.ksql.rest.server.resources.ClusterStatusResource;
 import io.confluent.ksql.rest.server.resources.HealthCheckResource;
 import io.confluent.ksql.rest.server.resources.HeartbeatResource;
@@ -161,6 +162,7 @@ public final class KsqlRestApplication extends ExecutableApplication<KsqlRestCon
   private final Consumer<KsqlConfig> rocksDBConfigSetterHandler;
   private final Optional<HeartbeatAgent> heartbeatAgent;
   private final Optional<LagReportingAgent> lagReportingAgent;
+  private final ActiveStandbyResource activeStandbyResource;
 
   public static SourceName getCommandsStreamName() {
     return COMMANDS_STREAM_NAME;
@@ -189,7 +191,8 @@ public final class KsqlRestApplication extends ExecutableApplication<KsqlRestCon
       final List<KsqlConfigurable> configurables,
       final Consumer<KsqlConfig> rocksDBConfigSetterHandler,
       final Optional<HeartbeatAgent> heartbeatAgent,
-      final Optional<LagReportingAgent> lagReportingAgent
+      final Optional<LagReportingAgent> lagReportingAgent,
+      final ActiveStandbyResource activeStandbyResource
   ) {
     super(restConfig);
 
@@ -215,6 +218,7 @@ public final class KsqlRestApplication extends ExecutableApplication<KsqlRestCon
         requireNonNull(rocksDBConfigSetterHandler, "rocksDBConfigSetterHandler");
     this.heartbeatAgent = requireNonNull(heartbeatAgent, "heartbeatAgent");
     this.lagReportingAgent = requireNonNull(lagReportingAgent, "lagReportingAgent");
+    this.activeStandbyResource = requireNonNull(activeStandbyResource, "activeStandbyResource");
   }
 
   @Override
@@ -233,6 +237,7 @@ public final class KsqlRestApplication extends ExecutableApplication<KsqlRestCon
     if (lagReportingAgent.isPresent()) {
       config.register(new LagReportingResource(lagReportingAgent.get()));
     }
+    config.register(activeStandbyResource);
     config.register(new KsqlExceptionMapper());
     config.register(new ServerStateDynamicBinding(serverState));
   }
@@ -617,6 +622,8 @@ public final class KsqlRestApplication extends ExecutableApplication<KsqlRestCon
         errorHandler
     );
 
+    final ActiveStandbyResource activeStandbyResource = new ActiveStandbyResource(ksqlEngine);
+
     final List<String> managedTopics = new LinkedList<>();
     managedTopics.add(commandTopicName);
     if (processingLogConfig.getBoolean(ProcessingLogConfig.TOPIC_AUTO_CREATE)) {
@@ -674,7 +681,8 @@ public final class KsqlRestApplication extends ExecutableApplication<KsqlRestCon
         configurables,
         rocksDBConfigSetterHandler,
         heartbeatAgent,
-        lagReportingAgent
+        lagReportingAgent,
+        activeStandbyResource
     );
   }
 
