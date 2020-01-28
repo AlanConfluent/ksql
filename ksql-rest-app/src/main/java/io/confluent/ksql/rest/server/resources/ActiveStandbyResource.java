@@ -15,11 +15,15 @@
 
 package io.confluent.ksql.rest.server.resources;
 
+import static io.confluent.common.utils.Utils.getHost;
+import static io.confluent.common.utils.Utils.getPort;
+
 import com.google.common.annotations.VisibleForTesting;
 import io.confluent.ksql.engine.KsqlEngine;
 import io.confluent.ksql.rest.entity.ActiveStandbyEntity;
 import io.confluent.ksql.rest.entity.ActiveStandbyResponse;
 import io.confluent.ksql.rest.entity.Versions;
+import io.confluent.ksql.util.KsqlException;
 import io.confluent.ksql.util.PersistentQueryMetadata;
 import io.confluent.ksql.util.QueryMetadata;
 import java.net.MalformedURLException;
@@ -35,6 +39,7 @@ import javax.ws.rs.Produces;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.streams.processor.internals.StreamsMetadataState;
 import org.apache.kafka.streams.state.HostInfo;
 import org.apache.kafka.streams.state.StreamsMetadata;
 
@@ -68,6 +73,19 @@ public class ActiveStandbyResource {
     }
 
     return new HostInfo(url.getHost(), url.getPort());
+  }
+
+  public static HostInfo parseHostInfo2(final String applicationServerId) {
+    if (applicationServerId == null || applicationServerId.trim().isEmpty()) {
+      return StreamsMetadataState.UNKNOWN_HOST;
+    }
+    final String host = getHost(applicationServerId);
+    final Integer port = getPort(applicationServerId);
+    if (host == null || port == null) {
+      throw new KsqlException(String.format(
+          "Error parsing host address %s. Expected format host:port.", applicationServerId));
+    }
+    return new HostInfo(host, port);
   }
 
   public void setLocalHostInfo(final String applicationServerId) {
