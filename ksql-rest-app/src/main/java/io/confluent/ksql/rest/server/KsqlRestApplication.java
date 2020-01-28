@@ -332,6 +332,8 @@ public final class KsqlRestApplication extends ExecutableApplication<KsqlRestCon
           .getKsqlStreamConfigProps().get(StreamsConfig.APPLICATION_SERVER_CONFIG));
       lagReportingAgent.get().startAgent();
     }
+    activeStandbyResource.setLocalHostInfo((String)configWithApplicationServer
+        .getKsqlStreamConfigProps().get(StreamsConfig.APPLICATION_SERVER_CONFIG));
 
     serverState.setReady();
   }

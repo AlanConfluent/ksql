@@ -20,9 +20,10 @@ import io.confluent.ksql.engine.KsqlEngine;
 import io.confluent.ksql.rest.entity.ActiveStandbyEntity;
 import io.confluent.ksql.rest.entity.ActiveStandbyResponse;
 import io.confluent.ksql.rest.entity.Versions;
-import io.confluent.ksql.rest.server.ServerUtil;
 import io.confluent.ksql.util.PersistentQueryMetadata;
 import io.confluent.ksql.util.QueryMetadata;
+import java.net.MalformedURLException;
+import java.net.URL;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -58,9 +59,20 @@ public class ActiveStandbyResource {
     this.engine = engine;
   }
 
-//  public void setLocalHostInfo(final String applicationServerId) {
-//    this.localHostInfo = ServerUtil.parseHostInfo(applicationServerId);
-//  }
+  public static HostInfo parseHostInfo(final String applicationServerId) {
+    URL url = null;
+    try {
+      url = new URL(applicationServerId);
+    } catch (MalformedURLException e) {
+      e.printStackTrace();
+    }
+
+    return new HostInfo(url.getHost(), url.getPort());
+  }
+
+  public void setLocalHostInfo(final String applicationServerId) {
+    this.localHostInfo = parseHostInfo(applicationServerId);
+  }
 
   @GET
   public Response getActiveStandbyInformation() {

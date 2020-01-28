@@ -437,7 +437,8 @@ public class KsqlRestApplicationTest {
         ImmutableList.of(ksqlResource, streamedQueryResource),
         rocksDBConfigSetterHandler,
         Optional.of(heartbeatAgent),
-        Optional.of(lagReportingAgent)
+        Optional.of(lagReportingAgent),
+        null
     );
   }
 }
