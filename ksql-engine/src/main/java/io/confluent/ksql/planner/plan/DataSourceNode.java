@@ -38,7 +38,7 @@ public class DataSourceNode extends PlanNode {
 
   private static final String SOURCE_OP_NAME = "Source";
 
-  private final DataSource<?> dataSource;
+  private final DataSource dataSource;
   private final SourceName alias;
   private final LogicalSchema schema;
   private final KeyField keyField;
@@ -47,7 +47,7 @@ public class DataSourceNode extends PlanNode {
 
   public DataSourceNode(
       final PlanNodeId id,
-      final DataSource<?> dataSource,
+      final DataSource dataSource,
       final SourceName alias,
       final List<SelectExpression> selectExpressions
   ) {
@@ -56,7 +56,7 @@ public class DataSourceNode extends PlanNode {
 
   DataSourceNode(
       final PlanNodeId id,
-      final DataSource<?> dataSource,
+      final DataSource dataSource,
       final SourceName alias,
       final List<SelectExpression> selectExpressions,
       final SchemaKStreamFactory schemaKStreamFactory
@@ -70,10 +70,10 @@ public class DataSourceNode extends PlanNode {
     // DataSourceNode copies implicit and key fields into the value schema
     // It users a KS valueMapper to add the key fields
     // and a KS transformValues to add the implicit fields
-    this.schema = dataSource.getSchema().withAlias(alias).withMetaAndKeyColsInValue();
+    this.schema = dataSource.getSchema()
+        .withMetaAndKeyColsInValue(dataSource.getKsqlTopic().getKeyFormat().isWindowed());
 
     this.keyField = dataSource.getKeyField()
-        .withAlias(alias)
         .validateKeyExistsIn(schema);
 
     this.schemaKStreamFactory = requireNonNull(schemaKStreamFactory, "schemaKStreamFactory");
@@ -89,7 +89,7 @@ public class DataSourceNode extends PlanNode {
     return keyField;
   }
 
-  public DataSource<?> getDataSource() {
+  public DataSource getDataSource() {
     return dataSource;
   }
 
@@ -141,7 +141,7 @@ public class DataSourceNode extends PlanNode {
   interface SchemaKStreamFactory {
     SchemaKStream<?> create(
         KsqlQueryBuilder builder,
-        DataSource<?> dataSource,
+        DataSource dataSource,
         QueryContext.Stacker contextStacker,
         KeyField keyField,
         SourceName alias

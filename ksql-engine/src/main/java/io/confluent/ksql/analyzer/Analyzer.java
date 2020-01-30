@@ -20,20 +20,22 @@ import static java.util.Objects.requireNonNull;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.MoreCollectors;
+import com.google.common.collect.Iterables;
 import io.confluent.ksql.analyzer.Analysis.AliasedDataSource;
 import io.confluent.ksql.analyzer.Analysis.Into;
 import io.confluent.ksql.analyzer.Analysis.JoinInfo;
 import io.confluent.ksql.execution.ddl.commands.KsqlTopic;
-import io.confluent.ksql.execution.expression.tree.ColumnReferenceExp;
 import io.confluent.ksql.execution.expression.tree.ComparisonExpression;
 import io.confluent.ksql.execution.expression.tree.Expression;
 import io.confluent.ksql.execution.expression.tree.FunctionCall;
+import io.confluent.ksql.execution.expression.tree.QualifiedColumnReferenceExp;
 import io.confluent.ksql.execution.expression.tree.TraversalExpressionVisitor;
+import io.confluent.ksql.execution.expression.tree.UnqualifiedColumnReferenceExp;
 import io.confluent.ksql.execution.plan.SelectExpression;
 import io.confluent.ksql.execution.windows.KsqlWindowExpression;
 import io.confluent.ksql.metastore.MetaStore;
 import io.confluent.ksql.metastore.model.DataSource;
+import io.confluent.ksql.model.WindowType;
 import io.confluent.ksql.name.ColumnName;
 import io.confluent.ksql.name.FunctionName;
 import io.confluent.ksql.name.SourceName;
@@ -65,6 +67,7 @@ import io.confluent.ksql.serde.KeyFormat;
 import io.confluent.ksql.serde.SerdeOption;
 import io.confluent.ksql.serde.SerdeOptions;
 import io.confluent.ksql.serde.ValueFormat;
+import io.confluent.ksql.serde.WindowInfo;
 import io.confluent.ksql.util.KsqlException;
 import io.confluent.ksql.util.SchemaUtil;
 import java.util.HashSet;
@@ -173,7 +176,7 @@ class Analyzer {
       setSerdeOptions(sink);
 
       if (!sink.shouldCreateSink()) {
-        final DataSource<?> existing = metaStore.getSource(sink.getName());
+        final DataSource existing = metaStore.getSource(sink.getName());
         if (existing == null) {
           throw new KsqlException("Unknown source: "
               + sink.getName().toString(FormatOptions.noEscape()));
@@ -258,9 +261,20 @@ class Analyzer {
     }
 
     private Optional<Delimiter> getValueDelimiter(final Sink sink) {
+      if (getValueFormat(sink) != Format.DELIMITED) {
+        // the delimiter is not inherited across non-delimited types
+        // (e.g. if source A is DELIMITED with |, and I create sink B
+        // with JSON from A and then sink C with DELIMITED from B, C
+        // will use the default delimiter, as opposed to |)
+        // see https://github.com/confluentinc/ksql/issues/4368 for
+        // more context
+        return Optional.empty();
+      }
+
       if (sink.getProperties().getValueDelimiter().isPresent()) {
         return sink.getProperties().getValueDelimiter();
       }
+
       return analysis
           .getFromDataSources()
           .get(0)
@@ -299,26 +313,19 @@ class Analyzer {
           new ExpressionAnalyzer(analysis.getFromSourceSchemas());
 
       for (final SelectExpression selectExpression : analysis.getSelectExpressions()) {
-        expressionAnalyzer.analyzeExpression(selectExpression.getExpression(), false);
+        expressionAnalyzer.analyzeExpression(selectExpression.getExpression());
       }
 
       analysis.getWhereExpression().ifPresent(where -> {
-        final boolean allowWindowMetaFields = pullQuery
-            && analysis.getFromDataSources().get(0)
-            .getDataSource()
-            .getKsqlTopic()
-            .getKeyFormat()
-            .isWindowed();
-
-        expressionAnalyzer.analyzeExpression(where, allowWindowMetaFields);
+        expressionAnalyzer.analyzeExpression(where);
       });
 
       for (final Expression expression : analysis.getGroupByExpressions()) {
-        expressionAnalyzer.analyzeExpression(expression, false);
+        expressionAnalyzer.analyzeExpression(expression);
       }
 
       analysis.getHavingExpression().ifPresent(having ->
-          expressionAnalyzer.analyzeExpression(having, false)
+          expressionAnalyzer.analyzeExpression(having)
       );
     }
 
@@ -342,31 +349,23 @@ class Analyzer {
         throw new KsqlException("Only equality join criteria is supported.");
       }
 
-      if (left.getDataSource().getName().equals(right.getDataSource().getName())) {
-        throw new KsqlException(
-            "Can not join '" + left.getDataSource().getName().toString(FormatOptions.noEscape())
-                + "' to '" + right.getDataSource().getName().toString(FormatOptions.noEscape())
-                + "': self joins are not yet supported."
-        );
-      }
+      final ExpressionAnalyzer expressionAnalyzer =
+          new ExpressionAnalyzer(analysis.getFromSourceSchemas());
 
-      final Set<ColumnRef> colsUsedInLeft = new ExpressionAnalyzer(analysis.getFromSourceSchemas())
-          .analyzeExpression(comparisonExpression.getLeft(), false);
-      final Set<ColumnRef> colsUsedInRight = new ExpressionAnalyzer(analysis.getFromSourceSchemas())
-          .analyzeExpression(comparisonExpression.getRight(), false);
+      final Set<SourceName> srcsUsedInLeft = expressionAnalyzer
+          .analyzeExpression(comparisonExpression.getLeft());
+
+      final Set<SourceName> srcsUsedInRight = expressionAnalyzer
+          .analyzeExpression(comparisonExpression.getRight());
 
       final SourceName leftSourceName = getOnlySourceForJoin(
-          comparisonExpression.getLeft(), comparisonExpression, colsUsedInLeft);
+          comparisonExpression.getLeft(), comparisonExpression, srcsUsedInLeft);
       final SourceName rightSourceName = getOnlySourceForJoin(
-          comparisonExpression.getRight(), comparisonExpression, colsUsedInRight);
+          comparisonExpression.getRight(), comparisonExpression, srcsUsedInRight);
 
-      if (!validJoin(left.getAlias(), right.getAlias(), leftSourceName, rightSourceName)) {
-        throw new KsqlException(
-            "Each side of the join must reference exactly one source and not the same source. "
-                + "Left side references " + leftSourceName
-                + " and right references " + rightSourceName
-        );
-      }
+      throwOnSelfJoin(left, right);
+      throwOnIncompleteJoinCriteria(left, right, leftSourceName, rightSourceName);
+      throwOnIncompatibleSourceWindowing(left, right);
 
       final boolean flipped = leftSourceName.equals(right.getAlias());
       analysis.setJoin(new JoinInfo(
@@ -379,27 +378,104 @@ class Analyzer {
       return null;
     }
 
-    private boolean validJoin(
-        final SourceName leftName,
-        final SourceName rightName,
+    private void throwOnSelfJoin(final AliasedDataSource left, final AliasedDataSource right) {
+      if (left.getDataSource().getName().equals(right.getDataSource().getName())) {
+        throw new KsqlException(
+            "Can not join '" + left.getDataSource().getName().toString(FormatOptions.noEscape())
+                + "' to '" + right.getDataSource().getName().toString(FormatOptions.noEscape())
+                + "': self joins are not yet supported."
+        );
+      }
+    }
+
+    private void throwOnIncompleteJoinCriteria(
+        final AliasedDataSource left,
+        final AliasedDataSource right,
         final SourceName leftExpressionSource,
         final SourceName rightExpressionSource
     ) {
-      return ImmutableSet.of(leftExpressionSource, rightExpressionSource)
-          .containsAll(ImmutableList.of(leftName, rightName));
+      final boolean valid = ImmutableSet.of(leftExpressionSource, rightExpressionSource)
+          .containsAll(ImmutableList.of(left.getAlias(), right.getAlias()));
+
+      if (!valid) {
+        throw new KsqlException(
+            "Each side of the join must reference exactly one source and not the same source. "
+                + "Left side references " + leftExpressionSource
+                + " and right references " + rightExpressionSource
+        );
+      }
+    }
+
+    private void throwOnIncompatibleSourceWindowing(
+        final AliasedDataSource left,
+        final AliasedDataSource right
+    ) {
+      final Optional<WindowType> leftWindowType = left.getDataSource()
+          .getKsqlTopic()
+          .getKeyFormat()
+          .getWindowInfo()
+          .map(WindowInfo::getType);
+
+      final Optional<WindowType> rightWindowType = right.getDataSource()
+          .getKsqlTopic()
+          .getKeyFormat()
+          .getWindowInfo()
+          .map(WindowInfo::getType);
+
+      if (leftWindowType.isPresent() != rightWindowType.isPresent()) {
+        throw windowedNonWindowedJoinException(left, right, leftWindowType, rightWindowType);
+      }
+
+      if (!leftWindowType.isPresent()) {
+        return;
+      }
+
+      final WindowType leftWt = leftWindowType.get();
+      final WindowType rightWt = rightWindowType.get();
+      final boolean compatible = leftWt == WindowType.SESSION
+          ? rightWt == WindowType.SESSION
+          : rightWt == WindowType.HOPPING || rightWt == WindowType.TUMBLING;
+
+      if (!compatible) {
+        throw new KsqlException("Incompatible windowed sources."
+            + System.lineSeparator()
+            + "Left source: " + leftWt
+            + System.lineSeparator()
+            + "Right source: " + rightWt
+            + System.lineSeparator()
+            + "Session windowed sources can only be joined to other session windowed sources, "
+            + "and may still not result in expected behaviour as session bounds must be an exact "
+            + "match for the join to work"
+            + System.lineSeparator()
+            + "Hopping and tumbling windowed sources can only be joined to other hopping and "
+            + "tumbling windowed sources"
+        );
+      }
+    }
+
+    private KsqlException windowedNonWindowedJoinException(
+        final AliasedDataSource left,
+        final AliasedDataSource right,
+        final Optional<WindowType> leftWindowType,
+        final Optional<WindowType> rightWindowType
+    ) {
+      final String leftMsg = leftWindowType.map(Object::toString).orElse("not");
+      final String rightMsg = rightWindowType.map(Object::toString).orElse("not");
+      return new KsqlException("Can not join windowed source to non-windowed source."
+          + System.lineSeparator()
+          + left.getAlias() + " is " + leftMsg + " windowed"
+          + System.lineSeparator()
+          + right.getAlias() + " is " + rightMsg + " windowed"
+      );
     }
 
     private SourceName getOnlySourceForJoin(
         final Expression exp,
         final ComparisonExpression join,
-        final Set<ColumnRef> columnRefs
+        final Set<SourceName> sources
     ) {
       try {
-        return columnRefs.stream()
-            .map(ColumnRef::source)
-            .filter(Optional::isPresent)
-            .map(Optional::get)
-            .collect(MoreCollectors.onlyElement());
+        return Iterables.getOnlyElement(sources);
       } catch (final Exception e) {
         throw new KsqlException("Invalid comparison expression '" + exp + "' in join '" + join
             + "'. Each side of the join comparision must contain references from exactly one "
@@ -429,7 +505,7 @@ class Analyzer {
     protected AstNode visitAliasedRelation(final AliasedRelation node, final Void context) {
       final SourceName structuredDataSourceName = ((Table) node.getRelation()).getName();
 
-      final DataSource<?> source = metaStore.getSource(structuredDataSourceName);
+      final DataSource source = metaStore.getSource(structuredDataSourceName);
       if (source == null) {
         throw new KsqlException(structuredDataSourceName + " does not exist.");
       }
@@ -502,13 +578,14 @@ class Analyzer {
             : "";
 
         final LogicalSchema schema = source.getDataSource().getSchema();
+        final boolean windowed = source.getDataSource().getKsqlTopic().getKeyFormat().isWindowed();
 
         // Non-join persistent queries only require value columns on SELECT *
         // where as joins and transient queries require all columns in the select:
         // See https://github.com/confluentinc/ksql/issues/3731 for more info
         final List<Column> valueColumns = persistent && !analysis.isJoin()
             ? schema.value()
-            : schema.columns();
+            : schema.withMetaAndKeyColsInValue(windowed).value();
 
         for (final Column column : valueColumns) {
 
@@ -516,8 +593,10 @@ class Analyzer {
             continue;
           }
 
-          final ColumnReferenceExp selectItem = new ColumnReferenceExp(location,
-              ColumnRef.of(source.getAlias(), column.name()));
+          final QualifiedColumnReferenceExp selectItem = new QualifiedColumnReferenceExp(
+              location,
+              source.getAlias(),
+              ColumnRef.of(column.name()));
 
           final String alias = aliasPrefix + column.name().name();
 
@@ -553,8 +632,7 @@ class Analyzer {
 
     private void addSelectItem(final Expression exp, final ColumnName columnName) {
       if (persistent) {
-        if (SchemaUtil.ROWTIME_NAME.equals(columnName)
-            || SchemaUtil.ROWKEY_NAME.equals(columnName)) {
+        if (SchemaUtil.systemColumnNames().contains(columnName)) {
           throw new KsqlException("Reserved column name in select: " + columnName + ". "
               + "Please remove or alias the column.");
         }
@@ -564,7 +642,16 @@ class Analyzer {
       final TraversalExpressionVisitor<Void> visitor = new TraversalExpressionVisitor<Void>() {
         @Override
         public Void visitColumnReference(
-            final ColumnReferenceExp node,
+            final UnqualifiedColumnReferenceExp node,
+            final Void context
+        ) {
+          columnRefs.add(node.getReference());
+          return null;
+        }
+
+        @Override
+        public Void visitQualifiedColumnReference(
+            final QualifiedColumnReferenceExp node,
             final Void context
         ) {
           columnRefs.add(node.getReference());

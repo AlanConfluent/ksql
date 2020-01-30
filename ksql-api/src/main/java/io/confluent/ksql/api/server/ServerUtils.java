@@ -15,8 +15,12 @@
 
 package io.confluent.ksql.api.server;
 
+import io.confluent.ksql.api.server.protocol.ErrorResponse;
+import io.confluent.ksql.api.server.protocol.PojoCodec;
+import io.confluent.ksql.api.server.protocol.PojoDeserializerErrorHandler;
+import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpServerResponse;
-import io.vertx.core.json.JsonObject;
+import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,14 +36,46 @@ public final class ServerUtils {
 
   public static void handleError(final HttpServerResponse response, final int statusCode,
       final int errorCode, final String errMsg) {
-    final JsonObject errResponse = new JsonObject().put("status", "error")
-        .put("errorCode", errorCode)
-        .put("message", errMsg);
-    response.setStatusCode(statusCode).end(errResponse.toBuffer());
+    final ErrorResponse errorResponse = new ErrorResponse(errorCode, errMsg);
+    final Buffer buffer = errorResponse.toBuffer();
+    response.setStatusCode(statusCode).end(buffer);
   }
 
   public static void unhandledExceptonHandler(final Throwable t) {
     log.error("Unhandled exception", t);
+  }
+
+  public static <T> Optional<T> deserialiseObject(final Buffer buffer,
+      final HttpServerResponse response,
+      final Class<T> clazz) {
+    return PojoCodec.deserialiseObject(buffer, new HttpResponseErrorHandler(response), clazz);
+  }
+
+  private static class HttpResponseErrorHandler implements PojoDeserializerErrorHandler {
+
+    private final HttpServerResponse response;
+
+    HttpResponseErrorHandler(final HttpServerResponse response) {
+      this.response = response;
+    }
+
+    @Override
+    public void onMissingParam(final String paramName) {
+      handleError(response, 400, ErrorCodes.ERROR_CODE_MISSING_PARAM,
+          "No " + paramName + " in arguments");
+    }
+
+    @Override
+    public void onExtraParam(final String paramName) {
+      handleError(response, 400, ErrorCodes.ERROR_CODE_UNKNOWN_PARAM,
+          "Unknown arg " + paramName);
+    }
+
+    @Override
+    public void onInvalidJson() {
+      handleError(response, 400, ErrorCodes.ERROR_CODE_MALFORMED_REQUEST,
+          "Malformed JSON in request");
+    }
   }
 
 }

@@ -35,12 +35,12 @@ import io.confluent.ksql.GenericRow;
 import io.confluent.ksql.execution.builder.KsqlQueryBuilder;
 import io.confluent.ksql.execution.context.QueryContext;
 import io.confluent.ksql.execution.context.QueryContext.Stacker;
-import io.confluent.ksql.execution.plan.AbstractStreamSource;
 import io.confluent.ksql.execution.plan.ExecutionStepPropertiesV1;
 import io.confluent.ksql.execution.plan.Formats;
 import io.confluent.ksql.execution.plan.KStreamHolder;
 import io.confluent.ksql.execution.plan.KTableHolder;
 import io.confluent.ksql.execution.plan.PlanBuilder;
+import io.confluent.ksql.execution.plan.SourceStep;
 import io.confluent.ksql.execution.plan.StreamSource;
 import io.confluent.ksql.execution.plan.TableSource;
 import io.confluent.ksql.execution.plan.WindowedStreamSource;
@@ -56,6 +56,7 @@ import io.confluent.ksql.serde.FormatInfo;
 import io.confluent.ksql.serde.SerdeOption;
 import io.confluent.ksql.serde.WindowInfo;
 import io.confluent.ksql.util.KsqlConfig;
+import io.confluent.ksql.util.SchemaUtil;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.Optional;
@@ -97,25 +98,39 @@ import org.mockito.junit.MockitoRule;
 public class SourceBuilderTest {
 
   private static final LogicalSchema SOURCE_SCHEMA = LogicalSchema.builder()
+      .keyColumn(SchemaUtil.ROWKEY_NAME, SqlTypes.BIGINT)
       .valueColumn(ColumnName.of("field1"), SqlTypes.STRING)
       .valueColumn(ColumnName.of("field2"), SqlTypes.BIGINT)
       .build();
+
   private static final Schema KEY_SCHEMA = SchemaBuilder.struct()
-      .field("k1", Schema.OPTIONAL_STRING_SCHEMA)
+      .field(SchemaUtil.ROWKEY_NAME.name(), Schema.OPTIONAL_FLOAT64_SCHEMA)
       .build();
-  private static final Struct KEY = new Struct(KEY_SCHEMA).put("k1", "foo");
+
+  private static final double A_KEY = 10.11;
+
+  private static final Struct KEY = new Struct(KEY_SCHEMA)
+      .put(SchemaUtil.ROWKEY_NAME.name(), A_KEY);
+
   private static final SourceName ALIAS = SourceName.of("alias");
-  private static final LogicalSchema SCHEMA =
-      SOURCE_SCHEMA.withMetaAndKeyColsInValue().withAlias(ALIAS);
+
+  private static final LogicalSchema SCHEMA = SOURCE_SCHEMA
+      .withMetaAndKeyColsInValue(false);
+
+  private static final LogicalSchema WINDOWED_SCHEMA = SOURCE_SCHEMA
+      .withMetaAndKeyColsInValue(true);
 
   private static final KsqlConfig KSQL_CONFIG = new KsqlConfig(ImmutableMap.of());
 
   private static final Optional<TimestampColumn> TIMESTAMP_COLUMN = Optional.of(
       new TimestampColumn(
-          ColumnRef.withoutSource(ColumnName.of("field2")),
+          ColumnRef.of(ColumnName.of("field2")),
           Optional.empty()
       )
   );
+
+  private static final long A_WINDOW_START = 10L;
+  private static final long A_WINDOW_END = 20L;
 
   private final Set<SerdeOption> SERDE_OPTIONS = new HashSet<>();
   private final PhysicalSchema PHYSICAL_SCHEMA = PhysicalSchema.from(SOURCE_SCHEMA, SERDE_OPTIONS);
@@ -157,7 +172,7 @@ public class SourceBuilderTest {
   @Mock
   private Materialized<Object, GenericRow, KeyValueStore<Bytes, byte[]>> materialized;
   @Captor
-  private ArgumentCaptor<ValueTransformerWithKeySupplier> transformSupplierCaptor;
+  private ArgumentCaptor<ValueTransformerWithKeySupplier<?, GenericRow, GenericRow>> transformSupplierCaptor;
   @Captor
   private ArgumentCaptor<TimestampExtractor> timestampExtractorCaptor;
   private final GenericRow row = new GenericRow(new LinkedList<>(ImmutableList.of("baz", 123)));
@@ -398,7 +413,7 @@ public class SourceBuilderTest {
     final KStreamHolder<?> builtKstream = windowedStreamSource.build(planBuilder);
 
     // Then:
-    assertThat(builtKstream.getSchema(), is(SCHEMA));
+    assertThat(builtKstream.getSchema(), is(WINDOWED_SCHEMA));
   }
 
   @Test
@@ -410,7 +425,7 @@ public class SourceBuilderTest {
     final KTableHolder<Windowed<Struct>> builtKTable = windowedTableSource.build(planBuilder);
 
     // Then:
-    assertThat(builtKTable.getSchema(), is(SCHEMA));
+    assertThat(builtKTable.getSchema(), is(WINDOWED_SCHEMA));
   }
 
   @Test
@@ -448,7 +463,7 @@ public class SourceBuilderTest {
     final GenericRow withTimestamp = transformer.transform(KEY, row);
 
     // Then:
-    assertThat(withTimestamp, equalTo(new GenericRow(456L, "foo", "baz", 123)));
+    assertThat(withTimestamp, equalTo(new GenericRow(456L, A_KEY, "baz", 123)));
   }
 
   @Test
@@ -462,7 +477,7 @@ public class SourceBuilderTest {
     final GenericRow withTimestamp = transformer.transform(KEY, row);
 
     // Then:
-    assertThat(withTimestamp, equalTo(new GenericRow(456L, "foo", "baz", 123)));
+    assertThat(withTimestamp, equalTo(new GenericRow(456L, A_KEY, "baz", 123)));
   }
 
   @Test
@@ -490,7 +505,7 @@ public class SourceBuilderTest {
 
     final Windowed<Struct> key = new Windowed<>(
         KEY,
-        new TimeWindow(10L, 20L)
+        new TimeWindow(A_WINDOW_START, A_WINDOW_END)
     );
 
     // When:
@@ -498,7 +513,7 @@ public class SourceBuilderTest {
 
     // Then:
     assertThat(withTimestamp,
-        equalTo(new GenericRow(456L, "foo : Window{start=10 end=-}", "baz", 123)));
+        equalTo(new GenericRow(456L, A_WINDOW_START, A_WINDOW_END, A_KEY, "baz", 123)));
   }
 
   @Test
@@ -510,7 +525,7 @@ public class SourceBuilderTest {
 
     final Windowed<Struct> key = new Windowed<>(
         KEY,
-        new TimeWindow(10L, 20L)
+        new TimeWindow(A_WINDOW_START, A_WINDOW_END)
     );
 
     // When:
@@ -518,7 +533,7 @@ public class SourceBuilderTest {
 
     // Then:
     assertThat(withTimestamp,
-        equalTo(new GenericRow(456L, "foo : Window{start=10 end=-}", "baz", 123)));
+        is(new GenericRow(456L, A_WINDOW_START, A_WINDOW_END, A_KEY, "baz", 123)));
   }
 
   @Test
@@ -530,7 +545,7 @@ public class SourceBuilderTest {
 
     final Windowed<Struct> key = new Windowed<>(
         KEY,
-        new SessionWindow(10L, 20L)
+        new SessionWindow(A_WINDOW_START, A_WINDOW_END)
     );
 
     // When:
@@ -538,7 +553,7 @@ public class SourceBuilderTest {
 
     // Then:
     assertThat(withTimestamp,
-        equalTo(new GenericRow(456L, "foo : Window{start=10 end=20}", "baz", 123)));
+        equalTo(new GenericRow(456L, A_WINDOW_START, A_WINDOW_END, A_KEY, "baz", 123)));
   }
 
   @Test
@@ -550,7 +565,7 @@ public class SourceBuilderTest {
 
     final Windowed<Struct> key = new Windowed<>(
         KEY,
-        new SessionWindow(10L, 20L)
+        new SessionWindow(A_WINDOW_START, A_WINDOW_END)
     );
 
     // When:
@@ -558,7 +573,7 @@ public class SourceBuilderTest {
 
     // Then:
     assertThat(withTimestamp,
-        equalTo(new GenericRow(456L, "foo : Window{start=10 end=20}", "baz", 123)));
+        equalTo(new GenericRow(456L, A_WINDOW_START, A_WINDOW_END, A_KEY, "baz", 123)));
   }
 
   @Test
@@ -636,7 +651,7 @@ public class SourceBuilderTest {
 
   @SuppressWarnings("unchecked")
   private <K> ValueTransformerWithKey<K, GenericRow, GenericRow> getTransformerFromStreamSource(
-      final AbstractStreamSource<?> streamSource
+      final SourceStep<?> streamSource
   ) {
     streamSource.build(planBuilder);
     verify(kStream).transformValues(transformSupplierCaptor.capture());
@@ -647,7 +662,7 @@ public class SourceBuilderTest {
 
   @SuppressWarnings("unchecked")
   private <K> ValueTransformerWithKey<K, GenericRow, GenericRow> getTransformerFromTableSource(
-      final AbstractStreamSource<?> streamSource
+      final SourceStep<?> streamSource
   ) {
     streamSource.build(planBuilder);
     verify(kTable).transformValues(transformSupplierCaptor.capture());

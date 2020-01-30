@@ -21,9 +21,9 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.errorprone.annotations.Immutable;
 import io.confluent.ksql.execution.ddl.commands.KsqlTopic;
-import io.confluent.ksql.execution.expression.tree.ColumnReferenceExp;
 import io.confluent.ksql.execution.expression.tree.Expression;
 import io.confluent.ksql.execution.expression.tree.FunctionCall;
+import io.confluent.ksql.execution.expression.tree.QualifiedColumnReferenceExp;
 import io.confluent.ksql.execution.plan.SelectExpression;
 import io.confluent.ksql.metastore.model.DataSource;
 import io.confluent.ksql.metastore.model.KsqlStream;
@@ -86,6 +86,7 @@ public class Analysis implements ImmutableAnalysis {
     selectColumnRefs.addAll(columnRefs);
   }
 
+  @Override
   public Optional<Into> getInto() {
     return into;
   }
@@ -94,6 +95,7 @@ public class Analysis implements ImmutableAnalysis {
     this.into = Optional.of(into);
   }
 
+  @Override
   public Optional<Expression> getWhereExpression() {
     return whereExpression;
   }
@@ -102,14 +104,17 @@ public class Analysis implements ImmutableAnalysis {
     this.whereExpression = Optional.of(whereExpression);
   }
 
+  @Override
   public List<SelectExpression> getSelectExpressions() {
     return Collections.unmodifiableList(selectExpressions);
   }
 
+  @Override
   public Set<ColumnRef> getSelectColumnRefs() {
     return Collections.unmodifiableSet(selectColumnRefs);
   }
 
+  @Override
   public List<Expression> getGroupByExpressions() {
     return ImmutableList.copyOf(groupByExpressions);
   }
@@ -118,6 +123,7 @@ public class Analysis implements ImmutableAnalysis {
     groupByExpressions.addAll(expressions);
   }
 
+  @Override
   public Optional<WindowExpression> getWindowExpression() {
     return windowExpression;
   }
@@ -134,6 +140,7 @@ public class Analysis implements ImmutableAnalysis {
     this.havingExpression = Optional.of(havingExpression);
   }
 
+  @Override
   public Optional<Expression> getPartitionBy() {
     return partitionBy;
   }
@@ -142,6 +149,7 @@ public class Analysis implements ImmutableAnalysis {
     this.partitionBy = Optional.of(partitionBy);
   }
 
+  @Override
   public OptionalInt getLimitClause() {
     return limitClause;
   }
@@ -166,21 +174,23 @@ public class Analysis implements ImmutableAnalysis {
     return joinInfo.isPresent();
   }
 
+  @Override
   public List<AliasedDataSource> getFromDataSources() {
     return ImmutableList.copyOf(fromDataSources);
   }
 
-  SourceSchemas getFromSourceSchemas() {
+  @Override
+  public SourceSchemas getFromSourceSchemas() {
     final Map<SourceName, LogicalSchema> schemaBySource = fromDataSources.stream()
         .collect(Collectors.toMap(
             AliasedDataSource::getAlias,
-            s -> s.getDataSource().getSchema()
+            Analysis::buildStreamsSchema
         ));
 
     return new SourceSchemas(schemaBySource);
   }
 
-  void addDataSource(final SourceName alias, final DataSource<?> dataSource) {
+  void addDataSource(final SourceName alias, final DataSource dataSource) {
     if (!(dataSource instanceof KsqlStream) && !(dataSource instanceof KsqlTable)) {
       throw new IllegalArgumentException("Data source type not supported yet: " + dataSource);
     }
@@ -188,15 +198,16 @@ public class Analysis implements ImmutableAnalysis {
     fromDataSources.add(new AliasedDataSource(alias, dataSource));
   }
 
-  ColumnReferenceExp getDefaultArgument() {
+  QualifiedColumnReferenceExp getDefaultArgument() {
     final SourceName alias = fromDataSources.get(0).getAlias();
-    return new ColumnReferenceExp(ColumnRef.of(alias, SchemaUtil.ROWTIME_NAME));
+    return new QualifiedColumnReferenceExp(alias, ColumnRef.of(SchemaUtil.ROWTIME_NAME));
   }
 
   void setSerdeOptions(final Set<SerdeOption> serdeOptions) {
     this.serdeOptions = ImmutableSet.copyOf(serdeOptions);
   }
 
+  @Override
   public Set<SerdeOption> getSerdeOptions() {
     return serdeOptions;
   }
@@ -205,6 +216,7 @@ public class Analysis implements ImmutableAnalysis {
     withProperties = requireNonNull(properties, "properties");
   }
 
+  @Override
   public CreateSourceAsProperties getProperties() {
     return withProperties;
   }
@@ -213,8 +225,17 @@ public class Analysis implements ImmutableAnalysis {
     this.tableFunctions.add(Objects.requireNonNull(functionCall));
   }
 
+  @Override
   public List<FunctionCall> getTableFunctions() {
     return tableFunctions;
+  }
+
+  private static LogicalSchema buildStreamsSchema(final AliasedDataSource s) {
+    // Include metadata & key columns in the value schema to match the schema the streams
+    // topology will use.
+    return s.getDataSource()
+        .getSchema()
+        .withMetaAndKeyColsInValue(s.getDataSource().getKsqlTopic().getKeyFormat().isWindowed());
   }
 
   @Immutable
@@ -259,11 +280,11 @@ public class Analysis implements ImmutableAnalysis {
   public static final class AliasedDataSource {
 
     private final SourceName alias;
-    private final DataSource<?> dataSource;
+    private final DataSource dataSource;
 
     AliasedDataSource(
         final SourceName alias,
-        final DataSource<?> dataSource
+        final DataSource dataSource
     ) {
       this.alias = requireNonNull(alias, "alias");
       this.dataSource = requireNonNull(dataSource, "dataSource");
@@ -273,7 +294,7 @@ public class Analysis implements ImmutableAnalysis {
       return alias;
     }
 
-    public DataSource<?> getDataSource() {
+    public DataSource getDataSource() {
       return dataSource;
     }
   }

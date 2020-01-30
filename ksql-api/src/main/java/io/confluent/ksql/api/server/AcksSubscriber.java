@@ -17,96 +17,98 @@ package io.confluent.ksql.api.server;
 
 import static io.confluent.ksql.api.server.ErrorCodes.ERROR_CODE_INTERNAL_ERROR;
 
+import io.confluent.ksql.api.server.protocol.ErrorResponse;
+import io.confluent.ksql.api.server.protocol.InsertAck;
+import io.vertx.core.Context;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpServerResponse;
 import io.vertx.core.json.JsonObject;
 import java.util.Objects;
-import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * As the stream of inserts is processed by the back-end, it communicates success (or failure) of
- * each insert by sending a stream of acks back in the other direction. This class is the subscriber
- * which subscribes to that stream of acks and sends them back to the client. It's a reactive
- * streams subscriber so implements back pressure.
+ * A reactive streams subscriber that subscribes to publishers of acks. As it receive acks it writes
+ * them to the HTTP response.
  */
-public class AcksSubscriber implements Subscriber<Void> {
+public class AcksSubscriber extends ReactiveSubscriber<JsonObject> {
 
   private static final Logger log = LoggerFactory.getLogger(AcksSubscriber.class);
   private static final int BATCH_SIZE = 4;
-  private static final Buffer ACK_RESPONSE_LINE = new JsonObject().put("status", "ok").toBuffer()
+  private static final Buffer OK_INSERT_RESPONSE_LINE = new InsertAck().toBuffer()
       .appendString("\n");
+  private static final int REQUEST_BATCH_SIZE = 1000;
 
   private final HttpServerResponse response;
-  private Subscription subscription;
-  private long tokens;
+  private final InsertsStreamResponseWriter insertsStreamResponseWriter;
   private Long insertsSent;
   private long acksSent;
+  private boolean drainHandlerSet;
 
-  public AcksSubscriber(final HttpServerResponse response) {
+  public AcksSubscriber(final Context context, final HttpServerResponse response,
+      final InsertsStreamResponseWriter insertsStreamResponseWriter) {
+    super(context);
     this.response = Objects.requireNonNull(response);
+    this.insertsStreamResponseWriter = Objects.requireNonNull(insertsStreamResponseWriter);
   }
 
   @Override
-  public synchronized void onSubscribe(final Subscription subscription) {
-    Objects.requireNonNull(subscription);
-    if (this.subscription != null) {
-      throw new IllegalStateException("Already subscribed");
-    }
-    this.subscription = subscription;
-    checkRequestTokens();
+  protected void afterSubscribe(final Subscription subscription) {
+    makeRequest(REQUEST_BATCH_SIZE);
   }
 
   @Override
-  public synchronized void onNext(final Void vo) {
-    if (tokens == 0) {
-      throw new IllegalStateException("Unsolicited data");
-    }
-    response.write(ACK_RESPONSE_LINE);
+  public void handleValue(final JsonObject value) {
+    checkContext();
+    insertsStreamResponseWriter.writeInsertResponse();
     acksSent++;
-    tokens--;
     if (insertsSent != null && insertsSent == acksSent) {
       close();
     } else if (response.writeQueueFull()) {
-      response.drainHandler(v -> checkRequestTokens());
+      if (!drainHandlerSet) {
+        response.drainHandler(v -> {
+          drainHandlerSet = false;
+          checkMakeRequest();
+        });
+        drainHandlerSet = true;
+      }
     } else {
-      checkRequestTokens();
+      checkMakeRequest();
     }
   }
 
-  synchronized void insertsSent(final long num) {
+  @Override
+  public void handleComplete() {
+    insertsStreamResponseWriter.end();
+  }
+
+  @Override
+  public void handleError(final Throwable t) {
+    log.error("Error in processing inserts", t);
+
+    final ErrorResponse errResponse = new ErrorResponse(ERROR_CODE_INTERNAL_ERROR,
+        "Error in processing inserts");
+    insertsStreamResponseWriter.writeError(errResponse).end();
+
+  }
+
+  private void checkMakeRequest() {
+    if (acksSent % REQUEST_BATCH_SIZE == 0) {
+      makeRequest(REQUEST_BATCH_SIZE);
+    }
+  }
+
+  private void close() {
+    insertsStreamResponseWriter.end();
+    complete();
+  }
+
+  void insertsSent(final long num) {
     this.insertsSent = num;
     if (acksSent == num) {
       close();
     }
   }
 
-  private void close() {
-    response.end();
-    subscription.cancel();
-  }
-
-  private void checkRequestTokens() {
-    if (tokens == 0) {
-      tokens = BATCH_SIZE;
-      subscription.request(BATCH_SIZE);
-    }
-  }
-
-  @Override
-  public synchronized void onError(final Throwable t) {
-    log.error("Error in processing inserts", t);
-    final JsonObject err = new JsonObject().put("status", "error")
-        .put("errorCode", ERROR_CODE_INTERNAL_ERROR)
-        .put("message", "Error in processing inserts");
-    subscription.cancel();
-    response.end(err.toBuffer());
-  }
-
-  @Override
-  public synchronized void onComplete() {
-    response.end();
-  }
 }

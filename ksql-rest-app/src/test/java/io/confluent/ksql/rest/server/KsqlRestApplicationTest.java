@@ -128,6 +128,8 @@ public class KsqlRestApplicationTest {
   private Consumer<KsqlConfig> rocksDBConfigSetterHandler;
   @Mock
   private HeartbeatAgent heartbeatAgent;
+  @Mock
+  private LagReportingAgent lagReportingAgent;
 
   @Mock
   private SchemaRegistryClient schemaRegistryClient;
@@ -138,7 +140,7 @@ public class KsqlRestApplicationTest {
   private KsqlRestConfig restConfig;
   private KsqlSecurityContext securityContext;
 
-  private ArgumentCaptor<KsqlSecurityContext> securityContextArgumentCaptor =
+  private final ArgumentCaptor<KsqlSecurityContext> securityContextArgumentCaptor =
       ArgumentCaptor.forClass(KsqlSecurityContext.class);
 
   @SuppressWarnings("unchecked")
@@ -156,7 +158,7 @@ public class KsqlRestApplicationTest {
     when(processingLogContext.getConfig()).thenReturn(processingLogConfig);
 
     when(ksqlEngine.parse(any())).thenReturn(ImmutableList.of(parsedStatement));
-    when(ksqlEngine.prepare(any())).thenReturn((PreparedStatement)preparedStatement);
+    when(ksqlEngine.prepare(any())).thenReturn((PreparedStatement) preparedStatement);
 
     when(commandQueue.getCommandTopicName()).thenReturn(CMD_TOPIC_NAME);
     when(serviceContext.getTopicClient()).thenReturn(topicClient);
@@ -379,7 +381,7 @@ public class KsqlRestApplicationTest {
   public void shouldConfigureIQWithInterNodeListenerIfSet() {
     // Given:
     givenAppWithRestConfig(ImmutableMap.of(
-        RestConfig.LISTENERS_CONFIG,  "http://localhost:0",
+        RestConfig.LISTENERS_CONFIG, "http://localhost:0",
         KsqlRestConfig.ADVERTISED_LISTENER_CONFIG, "https://some.host:12345"
     ));
 
@@ -397,7 +399,7 @@ public class KsqlRestApplicationTest {
   public void shouldConfigureIQWithFirstListenerIfInterNodeNotSet() {
     // Given:
     givenAppWithRestConfig(ImmutableMap.of(
-        RestConfig.LISTENERS_CONFIG,  "http://some.host:1244,https://some.other.host:1258"
+        RestConfig.LISTENERS_CONFIG, "http://some.host:1244,https://some.other.host:1258"
     ));
 
     // When:
@@ -434,7 +436,8 @@ public class KsqlRestApplicationTest {
         ImmutableList.of(precondition1, precondition2),
         ImmutableList.of(ksqlResource, streamedQueryResource),
         rocksDBConfigSetterHandler,
-        Optional.of(heartbeatAgent)
+        Optional.of(heartbeatAgent),
+        Optional.of(lagReportingAgent)
     );
   }
 }

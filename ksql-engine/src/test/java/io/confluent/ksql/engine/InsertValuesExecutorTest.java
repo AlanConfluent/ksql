@@ -31,7 +31,7 @@ import io.confluent.ksql.GenericRow;
 import io.confluent.ksql.execution.ddl.commands.KsqlTopic;
 import io.confluent.ksql.execution.expression.tree.ArithmeticUnaryExpression;
 import io.confluent.ksql.execution.expression.tree.BooleanLiteral;
-import io.confluent.ksql.execution.expression.tree.CreateArrayExpression;
+import io.confluent.ksql.execution.expression.tree.DecimalLiteral;
 import io.confluent.ksql.execution.expression.tree.DoubleLiteral;
 import io.confluent.ksql.execution.expression.tree.Expression;
 import io.confluent.ksql.execution.expression.tree.FunctionCall;
@@ -430,7 +430,7 @@ public class InsertValuesExecutorTest {
             new DoubleLiteral(3.0),
             new BooleanLiteral("TRUE"),
             new StringLiteral("str"),
-            new StringLiteral("1.2"))
+            new DecimalLiteral(new BigDecimal("1.2")))
     );
 
     // When:
@@ -873,10 +873,10 @@ public class InsertValuesExecutorTest {
     );
 
     final KeyField valueKeyField = keyField
-        .map(kf -> KeyField.of(ColumnRef.withoutSource(kf)))
+        .map(kf -> KeyField.of(ColumnRef.of(kf)))
         .orElse(KeyField.none());
 
-    final DataSource<?> dataSource;
+    final DataSource dataSource;
     if (table) {
       dataSource = new KsqlTable<>(
           "",

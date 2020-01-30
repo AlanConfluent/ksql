@@ -103,7 +103,7 @@ public class DdlCommandExec {
     @Override
     public DdlCommandResult executeDropSource(final DropSourceCommand dropSource) {
       final SourceName sourceName = dropSource.getSourceName();
-      final DataSource<?> dataSource = metaStore.getSource(sourceName);
+      final DataSource dataSource = metaStore.getSource(sourceName);
       if (dataSource == null) {
         return new DdlCommandResult(true, "Source " + sourceName + " does not exist.");
       }
@@ -135,7 +135,7 @@ public class DdlCommandExec {
 
   private static KeyField getKeyField(final Optional<ColumnName> keyFieldName) {
     return keyFieldName
-        .map(columnName -> KeyField.of(ColumnRef.withoutSource(columnName)))
+        .map(columnName -> KeyField.of(ColumnRef.of(columnName)))
         .orElseGet(KeyField::none);
   }
 
