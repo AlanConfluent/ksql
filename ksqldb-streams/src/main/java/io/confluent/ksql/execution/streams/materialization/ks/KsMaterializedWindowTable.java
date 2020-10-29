@@ -58,13 +58,12 @@ class KsMaterializedWindowTable implements MaterializedWindowedTable {
     try {
       final ReadOnlyWindowStore<Struct, ValueAndTimestamp<GenericRow>> store = stateStore
           .store(QueryableStoreTypes.timestampedWindowStore(), partition);
-      WindowStoreCacheRemover.remove(store);
 
       final Instant lower = calculateLowerBound(windowStartBounds, windowEndBounds);
 
       final Instant upper = calculateUpperBound(windowStartBounds, windowEndBounds);
 
-      try (WindowStoreIterator<ValueAndTimestamp<GenericRow>> it = store.fetch(key, lower, upper)) {
+      try (WindowStoreIterator<ValueAndTimestamp<GenericRow>> it = WindowStoreCacheBypass.fetch(store, key, lower, upper)) {
 
         final Builder<WindowedRow> builder = ImmutableList.builder();
 
