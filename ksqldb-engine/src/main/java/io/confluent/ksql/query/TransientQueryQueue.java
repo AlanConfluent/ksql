@@ -134,4 +134,8 @@ public class TransientQueryQueue implements BlockingRowQueue {
       Thread.currentThread().interrupt();
     }
   }
+
+  public boolean isClosed() {
+    return closed;
+  }
 }

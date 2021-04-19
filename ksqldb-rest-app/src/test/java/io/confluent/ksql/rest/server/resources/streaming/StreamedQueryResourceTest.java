@@ -63,6 +63,7 @@ import io.confluent.ksql.parser.tree.Query;
 import io.confluent.ksql.parser.tree.Statement;
 import io.confluent.ksql.physical.pull.HARouting;
 import io.confluent.ksql.physical.pull.PullQueryResult;
+import io.confluent.ksql.physical.scalable_push.PushRouting;
 import io.confluent.ksql.properties.DenyListPropertyValidator;
 import io.confluent.ksql.query.BlockingRowQueue;
 import io.confluent.ksql.query.KafkaStreamsBuilder;
@@ -203,6 +204,8 @@ public class StreamedQueryResourceTest {
   @Mock
   private HARouting haRouting;
   @Mock
+  private PushRouting pushRouting;
+  @Mock
   private PullQueryQueue pullQueryQueue;
   @Captor
   private ArgumentCaptor<Exception> exception;
@@ -248,6 +251,7 @@ public class StreamedQueryResourceTest {
         rateLimiter,
         concurrencyLimiter,
         haRouting,
+        pushRouting,
         Optional.empty()
     );
 
@@ -334,6 +338,7 @@ public class StreamedQueryResourceTest {
         pullQueryRateLimiter,
         concurrencyLimiter,
         haRouting,
+        pushRouting,
         Optional.empty()
     );
     testResource.configure(VALID_CONFIG);
@@ -404,6 +409,7 @@ public class StreamedQueryResourceTest {
         rateLimiter,
         concurrencyLimiter,
         haRouting,
+        pushRouting,
         Optional.empty()
     );
 
@@ -578,6 +584,7 @@ public class StreamedQueryResourceTest {
         rateLimiter,
         concurrencyLimiter,
         haRouting,
+        pushRouting,
         Optional.empty()
       );
     final Map<String, Object> props = new HashMap<>(ImmutableMap.of(

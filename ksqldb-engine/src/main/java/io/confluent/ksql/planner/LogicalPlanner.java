@@ -178,7 +178,10 @@ public class LogicalPlanner {
     return buildOutputNode(currentNode);
   }
 
-  public OutputNode buildPullLogicalPlan(final PullPlannerOptions pullPlannerOptions) {
+  public OutputNode buildPullLogicalPlan(
+      final PullPlannerOptions pullPlannerOptions,
+      final boolean isScalablePush
+  ) {
     final boolean isWindowed = analysis
         .getFrom()
         .getDataSource()
@@ -218,7 +221,8 @@ public class LogicalPlanner {
         ksqlConfig,
         analysis,
         isWindowed,
-        pullPlannerOptions);
+        pullPlannerOptions,
+        isScalablePush);
 
     return buildOutputNode(currentNode);
   }
