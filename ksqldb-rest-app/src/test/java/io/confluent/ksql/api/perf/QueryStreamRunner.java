@@ -142,7 +142,8 @@ public class QueryStreamRunner extends BasePerfRunner {
         ApiSecurityContext apiSecurityContext,
         Optional<Boolean> isInternalRequest,
         KsqlMediaType mediaType,
-        final MetricsCallbackHolder metricsCallbackHolder) {
+        final MetricsCallbackHolder metricsCallbackHolder,
+        Context context) {
       return null;
     }
 

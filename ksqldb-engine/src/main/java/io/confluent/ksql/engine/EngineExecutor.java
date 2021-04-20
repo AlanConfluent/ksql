@@ -75,6 +75,8 @@ import io.confluent.ksql.util.PlanSummary;
 import io.confluent.ksql.util.ScalablePushQueryMetadata;
 import io.confluent.ksql.util.TransientQueryMetadata;
 import io.confluent.ksql.util.TransientQueryMetadata.ResultType;
+import io.vertx.core.Context;
+import io.vertx.core.WorkerExecutor;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Objects;
@@ -230,7 +232,9 @@ final class EngineExecutor {
   ScalablePushQueryMetadata executeScalablePushQuery(
       final ConfiguredStatement<Query> statement,
       final PushRouting pushRouting,
-      final PushRoutingOptions pushRoutingOptions
+      final PushRoutingOptions pushRoutingOptions,
+      final Context context,
+      final WorkerExecutor workerExecutor
   ) {
     final SessionConfig sessionConfig = statement.getSessionConfig();
     try {
@@ -257,13 +261,14 @@ final class EngineExecutor {
           }, true);
       final PushPhysicalPlan physicalPlan = buildScalablePushPhysicalPlan(
           logicalPlan,
-          analysis
+          analysis,
+          context
       );
       TransientQueryQueue transientQueryQueue = new TransientQueryQueue(analysis.getLimitClause());
 
       PushQueryQueuePopulator populator = () ->
           pushRouting.handlePushQuery(serviceContext, physicalPlan, statement, pushRoutingOptions,
-              physicalPlan.getOutputSchema(), transientQueryQueue);
+              physicalPlan.getOutputSchema(), transientQueryQueue, workerExecutor);
       final ScalablePushQueryMetadata metadata = new ScalablePushQueryMetadata(
           physicalPlan.getOutputSchema(),
           physicalPlan.getQueryId(),
@@ -432,7 +437,8 @@ final class EngineExecutor {
 
   private PushPhysicalPlan buildScalablePushPhysicalPlan(
       final LogicalPlanNode logicalPlan,
-      final ImmutableAnalysis analysis
+      final ImmutableAnalysis analysis,
+      final Context context
   ) {
 
     final PushPhysicalPlanBuilder builder = new PushPhysicalPlanBuilder(
@@ -440,7 +446,7 @@ final class EngineExecutor {
         ScalablePushQueryExecutionUtil.findQuery(engineContext, analysis),
         analysis
     );
-    return builder.buildPushPhysicalPlan(logicalPlan);
+    return builder.buildPushPhysicalPlan(logicalPlan, context);
   }
 
   private PullPhysicalPlan buildPullPhysicalPlan(

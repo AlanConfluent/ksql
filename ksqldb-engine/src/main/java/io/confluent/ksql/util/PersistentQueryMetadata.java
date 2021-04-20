@@ -220,6 +220,7 @@ public class PersistentQueryMetadata extends QueryMetadata {
    */
   public synchronized void stop() {
     doClose(false);
+    scalablePushRegistry.ifPresent(ScalablePushRegistry::close);
   }
 //
 //  public void start() {

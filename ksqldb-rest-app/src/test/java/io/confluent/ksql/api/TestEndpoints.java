@@ -148,7 +148,7 @@ public class TestEndpoints implements Endpoints {
   public CompletableFuture<EndpointResponse> executeQueryRequest(KsqlRequest request,
       WorkerExecutor workerExecutor, CompletableFuture<Void> connectionClosedFuture,
       ApiSecurityContext apiSecurityContext, Optional<Boolean> isInternalRequest,
-      KsqlMediaType mediaType, final MetricsCallbackHolder metricsCallbackHolder) {
+      KsqlMediaType mediaType, final MetricsCallbackHolder metricsCallbackHolder, Context context) {
     return null;
   }
 
