@@ -10,6 +10,7 @@ import io.confluent.ksql.util.PersistentQueryMetadata;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.List;
+import org.apache.kafka.streams.KafkaStreams.State;
 import org.apache.kafka.streams.state.HostInfo;
 import org.apache.kafka.streams.state.StreamsMetadata;
 import org.junit.Test;
@@ -38,6 +39,8 @@ public class AllHostsLocatorTest {
         () -> ImmutableList.of(metadata1, metadata2),
         new URL("http://localhost:8088")
     );
+    when(metadata1.getState()).thenReturn(State.RUNNING);
+    when(metadata2.getState()).thenReturn(State.RUNNING);
     when(metadata1.getAllMetadata())
         .thenReturn(ImmutableList.of(streamsMetadata1, streamsMetadata2));
     when(metadata2.getAllMetadata())
